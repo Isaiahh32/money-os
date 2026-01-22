@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <title>Money OS</title>
+
+  <!-- PWA-ish metadata (works as "Add to Home Screen" web app) -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Money OS">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0b0b0c">
+
+  <style>
+    body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial; margin:0; background:#0b0b0c; color:#f2f2f2; }
+    header { padding: 16px; border-bottom: 1px solid #222; position: sticky; top:0; background:#0b0b0c; z-index: 10;}
+    h1 { margin:0; font-size: 18px; }
+    .wrap { padding: 16px; max-width: 980px; margin: 0 auto; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
+    .card { background:#121214; border:1px solid #222; border-radius: 14px; padding: 14px; }
+    .card h2 { margin:0 0 10px 0; font-size: 14px; color:#cfcfcf; font-weight:700; }
+    label { display:block; font-size: 12px; color:#cfcfcf; margin-top: 10px; }
+    input, button, select, textarea {
+      width:100%; box-sizing:border-box; border-radius: 10px; border:1px solid #2a2a2a;
+      background:#0f0f10; color:#f2f2f2; padding: 10px; font-size: 14px;
+    }
+    textarea { min-height: 70px; resize: vertical; }
+    button { background:#1f6feb; border:none; cursor:pointer; font-weight:800; }
+    button.secondary { background:#2a2a2a; }
+    button.danger { background:#a12a2a; }
+    .row { display:flex; gap:10px; }
+    .row > * { flex:1; }
+    .pill { display:inline-block; padding:6px 10px; border-radius: 999px; font-size: 12px; font-weight:800; border:1px solid #2a2a2a; }
+    .ok { background:#123b1a; color:#a8f5b6; border-color:#1f7a34; }
+    .warn { background:#3b2a12; color:#ffd58a; border-color:#9a6b1f; }
+    .bad { background:#3b1212; color:#ffb3b3; border-color:#a12a2a; }
+    .muted { color:#b5b5b5; font-size: 12px; }
+    .big { font-size: 22px; font-weight: 900; }
+    .line { height:1px; background:#222; margin: 12px 0; }
+    ul { padding-left: 18px; margin: 8px 0; }
+    .small { font-size: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>Money OS</h1>
+    <div class="muted">Bills → Buffer → Allowance → Trips → Extra Debt • Designed for simple control + visible wins.</div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="grid">
+    <!-- Balances + Targets -->
+    <div class="card">
+      <h2>Balances & Targets</h2>
+      <div class="row">
+        <div>
+          <label>Bills balance ($)</label>
+          <input id="bills" type="number" step="0.01" inputmode="decimal">
+        </div>
+        <div>
+          <label>Allowance balance ($)</label>
+          <input id="allow" type="number" step="0.01" inputmode="decimal">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Buffer balance ($)</label>
+          <input id="buffer" type="number" step="0.01" inputmode="decimal">
+        </div>
+        <div>
+          <label>Trips balance ($)</label>
+          <input id="trips" type="number" step="0.01" inputmode="decimal">
+        </div>
+      </div>
+
+      <label>Weekly allowance target ($/week)</label>
+      <input id="weekly" type="number" step="1" inputmode="numeric">
+
+      <label>Bills target range (min / ideal)</label>
+      <div class="row">
+        <input id="billsMin" type="number" step="1" inputmode="numeric" placeholder="min (e.g. 300)">
+        <input id="billsIdeal" type="number" step="1" inputmode="numeric" placeholder="ideal (e.g. 1000)">
+      </div>
+
+      <label>Buffer target / floor</label>
+      <div class="row">
+        <input id="bufferTarget" type="number" step="1" inputmode="numeric" placeholder="target (e.g. 500)">
+        <input id="bufferFloor" type="number" step="1" inputmode="numeric" placeholder="floor (e.g. 300)">
+      </div>
+
+      <div class="line"></div>
+      <button onclick="saveAll()">Save</button>
+      <div class="muted small" style="margin-top:8px;">Saved locally on this device only (no accounts, no bank linking).</div>
+    </div>
+
+    <!-- Status + Payday Script -->
+    <div class="card">
+      <h2>Today’s Status</h2>
+      <div id="status"></div>
+      <div class="line"></div>
+      <button onclick="runPaydayScript()">RUN PAYDAY SCRIPT</button>
+      <div class="muted small" style="margin-top:8px;">This does not move money — it tells you what to transfer, in order.</div>
+    </div>
+
+    <!-- Safe to Spend -->
+    <div class="card">
+      <h2>Safe to Spend?</h2>
+      <div class="muted small">Enter a purchase. App checks allowance first, then whether Bills stays above your floor after upcoming obligations.</div>
+
+      <label>Purchase amount ($)</label>
+      <input id="spendAmt" type="number" step="0.01" inputmode="decimal" placeholder="e.g. 27.99">
+
+      <label>Type</label>
+      <select id="spendType">
+        <option value="allowance">Allowance (normal purchases)</option>
+        <option value="bills_essential">Bills (essential only)</option>
+        <option value="trips">Trips (travel spending)</option>
+      </select>
+
+      <button class="secondary" onclick="checkSafeToSpend()" style="margin-top:10px;">CHECK</button>
+
+      <div class="line"></div>
+      <div id="spendResult" class="mono small"></div>
+    </div>
+
+    <!-- Obligations -->
+    <div class="card">
+      <h2>Upcoming obligations (next 10 days)</h2>
+      <div class="muted small">Add anything that could hit Bills soon (insurance, installments, etc.).</div>
+
+      <label>Description</label>
+      <input id="oblDesc" placeholder="Insurance, Affirm, PayPal, etc.">
+
+      <div class="row">
+        <div>
+          <label>Amount ($)</label>
+          <input id="oblAmt" type="number" step="0.01" inputmode="decimal">
+        </div>
+        <div>
+          <label>Due date</label>
+          <input id="oblDate" type="date">
+        </div>
+      </div>
+      <button class="secondary" onclick="addObligation()" style="margin-top:10px;">Add obligation</button>
+
+      <div class="line"></div>
+      <div id="obligations"></div>
+      <button class="secondary" onclick="clearObligations()">Clear list</button>
+    </div>
+
+    <!-- Trip countdown -->
+    <div class="card">
+      <h2>Trip Countdown</h2>
+      <div class="muted small">Set your trip date + target. App tells you how much you need per week/paycheck.</div>
+
+      <label>Trip date</label>
+      <input id="tripDate" type="date">
+
+      <div class="row">
+        <div>
+          <label>Trip target ($)</label>
+          <input id="tripTarget" type="number" step="1" inputmode="numeric" placeholder="e.g. 1000">
+        </div>
+        <div>
+          <label>Pay cycle</label>
+          <select id="payCycle">
+            <option value="biweekly">Biweekly (every 2 weeks)</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="secondary" onclick="updateTripPlan()" style="margin-top:10px;">UPDATE TRIP PLAN</button>
+
+      <div class="line"></div>
+      <div id="tripPlan"></div>
+    </div>
+
+    <!-- Debt planner -->
+    <div class="card">
+      <h2>Debt Payoff Planner</h2>
+      <div class="muted small">Enter Amex + installment totals. Choose your extra payment per paycheck. App estimates payoff dates.</div>
+
+      <div class="row">
+        <div>
+          <label>Amex balance ($)</label>
+          <input id="amexBal" type="number" step="0.01" inputmode="decimal" placeholder="e.g. 4981.55">
+        </div>
+        <div>
+          <label>Amex APR (%)</label>
+          <input id="amexApr" type="number" step="0.01" inputmode="decimal" placeholder="e.g. 28.49">
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Installments total ($)</label>
+          <input id="instBal" type="number" step="0.01" inputmode="decimal" placeholder="e.g. 2623">
+        </div>
+        <div>
+          <label>Installments monthly payments ($)</label>
+          <input id="instMonthly" type="number" step="0.01" inputmode="decimal" placeholder="optional">
+        </div>
+      </div>
+
+      <label>Extra payment per paycheck ($) — after Bills/Buffer/Allowance</label>
+      <input id="extraPerPaycheck" type="number" step="1" inputmode="numeric" placeholder="e.g. 400">
+
+      <label>Strategy</label>
+      <select id="debtStrategy">
+        <option value="amex_first">Amex first, then installments</option>
+        <option value="installments_first">Installments first, then Amex</option>
+        <option value="split">Split extra (70% Amex / 30% installments)</option>
+      </select>
+
+      <button class="secondary" onclick="calcDebtPlan()" style="margin-top:10px;">CALCULATE</button>
+
+      <div class="line"></div>
+      <div id="debtPlan" class="small"></div>
+
+      <div class="line"></div>
+      <div class="muted small">
+        Tip: With high APR debt, paying it down faster usually saves the most money and stress.
+      </div>
+    </div>
+
+    <!-- Impulse Save Tracker -->
+    <div class="card">
+      <h2>Impulse Save Tracker</h2>
+      <div class="muted small">Log something you almost bought. This is your “saved by not buying” scoreboard.</div>
+
+      <label>Item you skipped</label>
+      <input id="skipItem" placeholder="Amazon gadget, snacks, gear, etc.">
+
+      <label>Amount you didn’t spend ($)</label>
+      <input id="skipAmt" type="number" step="0.01" inputmode="decimal">
+
+      <button class="secondary" onclick="logSave()" style="margin-top:10px;">Log Save</button>
+
+      <div class="line"></div>
+      <div id="saves"></div>
+      <button class="secondary" onclick="clearSaves()">Clear saves</button>
+    </div>
+
+    <!-- Rules card -->
+    <div class="card">
+      <h2>Your Rules</h2>
+      <ul class="small">
+        <li><b>Buffer is protection.</b> Only use to prevent late fees/overdrafts or true emergencies.</li>
+        <li><b>Allowance comes from cash flow, not buffer.</b> If Bills is below floor, allowance pauses.</li>
+        <li><b>Trips fund is for experiences only.</b> No “gear for a trip” unless already planned.</li>
+        <li><b>Payday order:</b> Bills → Buffer → Allowance → Trips → Extra debt.</li>
+        <li><b>Impulse wins count.</b> Log skips to train your brain.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ----- Storage -----
+  const LS_KEY = "money_os_v2";
+  function getData(){ return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); }
+  function setData(patch){ localStorage.setItem(LS_KEY, JSON.stringify({...getData(), ...patch})); }
+  function byId(id){ return document.getElementById(id); }
+  function num(id){ return parseFloat(byId(id).value || "0"); }
+  function escapeHtml(s){ return s.replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+
+  function loadAll(){
+    const d = getData();
+    byId("bills").value = d.bills ?? 0;
+    byId("allow").value = d.allow ?? 0;
+    byId("buffer").value = d.buffer ?? 0;
+    byId("trips").value = d.trips ?? 0;
+    byId("weekly").value = d.weekly ?? 100;
+    byId("billsMin").value = d.billsMin ?? 300;
+    byId("billsIdeal").value = d.billsIdeal ?? 1000;
+    byId("bufferTarget").value = d.bufferTarget ?? 500;
+    byId("bufferFloor").value = d.bufferFloor ?? 300;
+
+    byId("tripDate").value = d.tripDate ?? "";
+    byId("tripTarget").value = d.tripTarget ?? 1000;
+    byId("payCycle").value = d.payCycle ?? "biweekly";
+
+    byId("amexBal").value = d.amexBal ?? "";
+    byId("amexApr").value = d.amexApr ?? 28.49;
+    byId("instBal").value = d.instBal ?? "";
+    byId("instMonthly").value = d.instMonthly ?? "";
+    byId("extraPerPaycheck").value = d.extraPerPaycheck ?? 0;
+    byId("debtStrategy").value = d.debtStrategy ?? "amex_first";
+
+    renderObligations();
+    renderSaves();
+    renderStatus();
+    updateTripPlan(true);
+    calcDebtPlan(true);
+  }
+
+  function saveAll(){
+    const d = getData();
+    setData({
+      bills: num("bills"),
+      allow: num("allow"),
+      buffer: num("buffer"),
+      trips: num("trips"),
+      weekly: num("weekly"),
+      billsMin: num("billsMin"),
+      billsIdeal: num("billsIdeal"),
+      bufferTarget: num("bufferTarget"),
+      bufferFloor: num("bufferFloor"),
+      tripDate: byId("tripDate").value,
+      tripTarget: num("tripTarget"),
+      payCycle: byId("payCycle").value,
+      amexBal: num("amexBal"),
+      amexApr: num("amexApr"),
+      instBal: num("instBal"),
+      instMonthly: num("instMonthly"),
+      extraPerPaycheck: num("extraPerPaycheck"),
+      debtStrategy: byId("debtStrategy").value,
+      obligations: d.obligations || [],
+      saves: d.saves || []
+    });
+    renderStatus(); updateTripPlan(true); calcDebtPlan(true);
+    alert("Saved.");
+  }
+
+  // ----- Obligations -----
+  function addObligation(){
+    const desc = byId("oblDesc").value.trim();
+    const amt = parseFloat(byId("oblAmt").value || "0");
+    const date = byId("oblDate").value;
+    if(!desc || !date || !(amt>0)) return alert("Enter description, amount, and date.");
+    const d = getData();
+    const obligations = d.obligations || [];
+    obligations.push({desc, amt, date, id: (crypto?.randomUUID?.() || String(Date.now()+Math.random()))});
+    setData({obligations});
+    byId("oblDesc").value = ""; byId("oblAmt").value = ""; byId("oblDate").value = "";
+    renderObligations(); renderStatus();
+  }
+  function clearObligations(){
+    if(!confirm("Clear all obligations?")) return;
+    setData({obligations: []});
+    renderObligations(); renderStatus();
+  }
+  function sumObligationsNextDays(days){
+    const d = getData();
+    const obligations = d.obligations || [];
+    const today = new Date(); today.setHours(0,0,0,0);
+    const end = new Date(today); end.setDate(end.getDate()+days);
+    let sum = 0;
+    for(const o of obligations){
+      const od = new Date(o.date+"T00:00:00");
+      if(od>=today && od<=end) sum += o.amt;
+    }
+    return sum;
+  }
+  function renderObligations(){
+    const d = getData();
+    const obligations = (d.obligations || []).slice().sort((a,b)=>a.date.localeCompare(b.date));
+    const el = byId("obligations");
+    if(obligations.length===0){ el.innerHTML = "<div class='muted'>No obligations added.</div>"; return; }
+    const today = new Date(); today.setHours(0,0,0,0);
+    const in10 = new Date(today); in10.setDate(in10.getDate()+10);
+
+    let sumNext10 = 0;
+    let html = "<ul>";
+    for(const o of obligations){
+      const od = new Date(o.date+"T00:00:00");
+      const inWindow = (od>=today && od<=in10);
+      if(inWindow) sumNext10 += o.amt;
+      html += `<li>${o.date} — <b>$${o.amt.toFixed(2)}</b> — ${escapeHtml(o.desc)} ${inWindow ? "<span class='pill warn'>next 10d</span>": ""}</li>`;
+    }
+    html += "</ul>";
+    html += `<div class="muted small">Sum due in next 10 days: <b>$${sumNext10.toFixed(2)}</b></div>`;
+    el.innerHTML = html;
+  }
+
+  // ----- Status -----
+  function tag(text, cls){ return `<span class="pill ${cls}">${text}</span>`; }
+
+  function renderStatus(){
+    const bills = num("bills"), allow = num("allow"), buffer = num("buffer"), trips = num("trips");
+    const billsMin = num("billsMin"), billsIdeal = num("billsIdeal");
+    const bufferTarget = num("bufferTarget"), bufferFloor = num("bufferFloor");
+    const weekly = num("weekly");
+
+    const due10 = sumObligationsNextDays(10);
+    const billsAfter10 = bills - due10;
+
+    let billsTag = bills>=billsIdeal ? tag("Bills: strong", "ok") :
+                   bills>=billsMin ? tag("Bills: ok", "warn") :
+                   tag("Bills: low", "bad");
+
+    let bufferTag = buffer>=bufferTarget ? tag("Buffer: target hit", "ok") :
+                    buffer>=bufferFloor ? tag("Buffer: safe", "warn") :
+                    tag("Buffer: too low", "bad");
+
+    let allowTag = allow>=weekly ? tag("Allowance: comfortable", "ok") :
+                   allow>0 ? tag("Allowance: low", "warn") :
+                   tag("Allowance: empty", "bad");
+
+    let html = `
+      <div class="big">$${allow.toFixed(2)} <span class="muted">allowance</span></div>
+      <div class="muted">Bills: $${bills.toFixed(2)} • Buffer: $${buffer.toFixed(2)} • Trips: $${trips.toFixed(2)}</div>
+      <div style="margin-top:10px;">${billsTag} ${bufferTag} ${allowTag}</div>
+      <div class="line"></div>
+      <div class="muted small">Next 10 days obligations: <b>$${due10.toFixed(2)}</b></div>
+      <div class="muted small">Bills after obligations: <b>$${billsAfter10.toFixed(2)}</b></div>
+    `;
+    byId("status").innerHTML = html;
+  }
+
+  // ----- Payday Script -----
+  function runPaydayScript(){
+    const bills = num("bills"), buffer = num("buffer"), allow = num("allow");
+    const weekly = num("weekly");
+    const billsMin = num("billsMin"), billsIdeal = num("billsIdeal");
+    const bufferTarget = num("bufferTarget"), bufferFloor = num("bufferFloor");
+
+    const due10 = sumObligationsNextDays(10);
+    const billsNeedToFloor = Math.max(0, billsMin + due10 - bills);
+    const billsNeedToIdeal = Math.max(0, billsIdeal + due10 - bills);
+    const bufferNeedToFloor = Math.max(0, bufferFloor - buffer);
+    const bufferNeedToTarget = Math.max(0, bufferTarget - buffer);
+    const allowanceTo2Weeks = Math.max(0, (weekly*2) - allow);
+
+    let msg =
+`PAYDAY SCRIPT (do in this exact order)
+
+1) Bills first:
+   - Cover next 10 days obligations: $${due10.toFixed(2)}
+   - If Bills below floor, bring it up.
+   - Add to reach:
+     • Floor coverage: $${billsNeedToFloor.toFixed(2)}
+     • Ideal coverage: $${billsNeedToIdeal.toFixed(2)}
+
+2) Buffer second:
+   - Bring Buffer to at least floor ($${bufferFloor.toFixed(0)}): $${bufferNeedToFloor.toFixed(2)}
+   - Then toward target ($${bufferTarget.toFixed(0)}): $${bufferNeedToTarget.toFixed(2)}
+
+3) Allowance third:
+   - Refill to 2 weeks ($${(weekly*2).toFixed(0)}): $${allowanceTo2Weeks.toFixed(2)}
+
+4) After those:
+   - Extra goes to: Amex payoff → installments → trips (unless trip date is near).
+
+RULE: If Bills below floor OR Buffer below floor, allowance pauses.
+`;
+    alert(msg);
+  }
+
+  // ----- Safe to Spend -----
+  function checkSafeToSpend(){
+    const amt = parseFloat(byId("spendAmt").value || "0");
+    const type = byId("spendType").value;
+    if(!(amt>0)) return byId("spendResult").innerText = "Enter an amount.";
+
+    const bills = num("bills"), allow = num("allow"), buffer = num("buffer"), trips = num("trips");
+    const billsMin = num("billsMin");
+    const due10 = sumObligationsNextDays(10);
+
+    let ok = true;
+    let reasons = [];
+
+    if(type === "allowance"){
+      if(allow < amt){
+        ok = false;
+        reasons.push(`Allowance would go negative. Allowance=$${allow.toFixed(2)} < $${amt.toFixed(2)}.`);
+      }
+      // Also check Bills stability (optional caution)
+      if((bills - due10) < billsMin){
+        reasons.push(`Heads-up: Bills after next 10 days obligations is below floor. Consider pausing extras.`);
+      }
+    }
+
+    if(type === "bills_essential"){
+      const billsAfter = bills - due10 - amt;
+      if(billsAfter < billsMin){
+        ok = false;
+        reasons.push(`Bills would drop below floor after upcoming obligations. BillsAfter=$${billsAfter.toFixed(2)} < floor $${billsMin.toFixed(2)}.`);
+      }
+    }
+
+    if(type === "trips"){
+      if(trips < amt){
+        ok = false;
+        reasons.push(`Trips balance insufficient. Trips=$${trips.toFixed(2)} < $${amt.toFixed(2)}.`);
+      }
+    }
+
+    const banner = ok ? "✅ SAFE" : "❌ NOT SAFE";
+    const detail = reasons.length ? reasons.map(r=>"• "+r).join("\n") : "• Looks good. Stay within your system.";
+    byId("spendResult").innerText = `${banner}\n\n${detail}`;
+  }
+
+  // ----- Trip Countdown -----
+  function daysBetween(a,b){
+    const ms = b.getTime() - a.getTime();
+    return Math.ceil(ms / (1000*60*60*24));
+  }
+
+  function updateTripPlan(silent=false){
+    const tripDateStr = byId("tripDate").value || "";
+    const target = parseFloat(byId("tripTarget").value || "0");
+    const payCycle = byId("payCycle").value;
+    const tripsBal = num("trips");
+
+    if(!tripDateStr || !(target>0)){
+      byId("tripPlan").innerHTML = "<div class='muted'>Set a trip date and target.</div>";
+      if(!silent) saveAll();
+      return;
+    }
+
+    const now = new Date(); now.setHours(0,0,0,0);
+    const tripDate = new Date(tripDateStr+"T00:00:00");
+    const days = daysBetween(now, tripDate);
+
+    const remaining = Math.max(0, target - tripsBal);
+
+    let periods = 0;
+    if(payCycle === "weekly") periods = Math.max(1, Math.ceil(days/7));
+    if(payCycle === "biweekly") periods = Math.max(1, Math.ceil(days/14));
+    if(payCycle === "monthly") periods = Math.max(1, Math.ceil(days/30));
+
+    const perPeriod = remaining / periods;
+    const perWeek = remaining / Math.max(1, Math.ceil(days/7));
+
+    const html = `
+      <div class="big">$${tripsBal.toFixed(2)} <span class="muted">in Trips</span></div>
+      <div class="muted">Target: $${target.toFixed(2)} • Remaining: <b>$${remaining.toFixed(2)}</b></div>
+      <div class="muted">Days until trip: <b>${days}</b></div>
+      <div class="line"></div>
+      <div class="small">
+        • Needed per week: <b>$${perWeek.toFixed(2)}</b><br/>
+        • Needed per ${payCycle}: <b>$${perPeriod.toFixed(2)}</b><br/>
+      </div>
+      <div class="muted small" style="margin-top:8px;">
+        Rule: Fund trips only after Bills+Buffer are safe.
+      </div>
+    `;
+    byId("tripPlan").innerHTML = html;
+
+    if(!silent) saveAll();
+  }
+
+  // ----- Debt Planner -----
+  function monthlyRate(aprPct){ return (aprPct/100)/12; }
+
+  function calcDebtPlan(silent=false){
+    const amexBal = parseFloat(byId("amexBal").value || "0");
+    const amexApr = parseFloat(byId("amexApr").value || "0");
+    const instBal = parseFloat(byId("instBal").value || "0");
+    const extra = parseFloat(byId("extraPerPaycheck").value || "0");
+    const strat = byId("debtStrategy").value;
+
+    if(!(extra>0) || (!(amexBal>0) && !(instBal>0))){
+      byId("debtPlan").innerHTML = "<div class='muted'>Enter balances and an extra payment per paycheck.</div>";
+      if(!silent) saveAll();
+      return;
+    }
+
+    // Convert extra-per-paycheck into extra-per-month, assuming biweekly is ~2.166 paychecks/mo
+    // We keep it simple: assume 2 paychecks/month for planning unless user changes; conservative.
+    const paychecksPerMonth = 2;
+    const extraMonthly = extra * paychecksPerMonth;
+
+    // Split strategy
+    let amexShare = 0, instShare = 0;
+    if(strat === "amex_first"){ amexShare = 1; instShare = 0; }
+    if(strat === "installments_first"){ amexShare = 0; instShare = 1; }
+    if(strat === "split"){ amexShare = 0.7; instShare = 0.3; }
+
+    // Rough payoff month estimates (simple amortization simulation)
+    let months = 0;
+    let a = amexBal;
+    let i = instBal;
+    const r = monthlyRate(amexApr);
+
+    // If installments_first or split, installments don't accrue here (most are fixed), we treat as 0% principal for estimate.
+    // Amex accrues interest in sim.
+    while((a > 0.01 || i > 0.01) && months < 240){
+      months++;
+
+      // Interest on amex
+      if(a > 0.01 && r > 0) a = a * (1 + r);
+
+      // Allocate extra
+      let amexPay = extraMonthly * amexShare;
+      let instPay = extraMonthly * instShare;
+
+      if(strat === "amex_first"){
+        // pay amex until done, then redirect to installments
+        if(a > 0.01){
+          a = Math.max(0, a - extraMonthly);
+        } else {
+          i = Math.max(0, i - extraMonthly);
+        }
+      } else if(strat === "installments_first"){
+        if(i > 0.01){
+          i = Math.max(0, i - extraMonthly);
+        } else {
+          a = Math.max(0, a - extraMonthly);
+        }
+      } else {
+        // split
+        a = Math.max(0, a - amexPay);
+        i = Math.max(0, i - instPay);
+      }
+    }
+
+    const years = (months/12);
+    const monthsRounded = months;
+
+    // Display recommendations
+    const html = `
+      <div><b>Extra per paycheck:</b> $${extra.toFixed(2)} (≈ $${extraMonthly.toFixed(2)}/month)</div>
+      <div><b>Strategy:</b> ${escapeHtml(byId("debtStrategy").selectedOptions[0].text)}</div>
+      <div class="line"></div>
+      <div><b>Estimated time to clear Amex + installments (extra only):</b> ~${monthsRounded} months (${years.toFixed(1)} years)</div>
+      <div class="muted small" style="margin-top:8px;">
+        Notes:
+        <ul>
+          <li>This estimate assumes your “extra payment” stays consistent and doesn’t include minimum payments (which would speed it up).</li>
+          <li>Amex interest is modeled; installment interest isn’t (varies by plan). Use this for direction, not perfection.</li>
+        </ul>
+      </div>
+    `;
+    byId("debtPlan").innerHTML = html;
+
+    if(!silent) saveAll();
+  }
+
+  // ----- Impulse Saves -----
+  function logSave(){
+    const item = byId("skipItem").value.trim();
+    const amt = parseFloat(byId("skipAmt").value || "0");
+    if(!item || !(amt>0)) return alert("Enter item and amount.");
+    const d = getData();
+    const saves = d.saves || [];
+    saves.push({item, amt, ts: Date.now(), id: (crypto?.randomUUID?.() || String(Date.now()+Math.random()))});
+    setData({saves});
+    byId("skipItem").value = ""; byId("skipAmt").value = "";
+    renderSaves();
+  }
+  function clearSaves(){
+    if(!confirm("Clear all saved logs?")) return;
+    setData({saves: []});
+    renderSaves();
+  }
+  function renderSaves(){
+    const d = getData();
+    const saves = (d.saves || []).slice().sort((a,b)=>b.ts-a.ts);
+    const el = byId("saves");
+    if(saves.length===0){ el.innerHTML = "<div class='muted'>No saves logged yet.</div>"; return; }
+    const now = Date.now();
+    const weekAgo = now - 7*24*3600*1000;
+    const monthAgo = now - 30*24*3600*1000;
+    let week = 0, month = 0, total = 0;
+    for(const s of saves){
+      total += s.amt;
+      if(s.ts>=weekAgo) week += s.amt;
+      if(s.ts>=monthAgo) month += s.amt;
+    }
+    let html = `<div class="big">$${week.toFixed(2)} <span class="muted">saved (7d)</span></div>`;
+    html += `<div class="muted">Month: $${month.toFixed(2)} • All-time: $${total.toFixed(2)}</div>`;
+    html += "<ul>";
+    for(const s of saves.slice(0,10)){
+      const dt = new Date(s.ts).toLocaleString();
+      html += `<li><b>$${s.amt.toFixed(2)}</b> — ${escapeHtml(s.item)} <span class="muted">(${dt})</span></li>`;
+    }
+    html += "</ul>";
+    el.innerHTML = html;
+  }
+
+  // ----- Live updates -----
+  window.addEventListener("load", loadAll);
+  window.addEventListener("input", ()=>{ renderStatus(); });
+</script>
+</body>
+</html>
